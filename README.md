@@ -10,6 +10,9 @@
 An MCP (Model Context Protocol) server that connects AI assistants to <a href="https://super-productivity.com">Super Productivity</a> — manage tasks, projects, and tags through Claude Desktop, Kiro, or any MCP-compatible client.
 </p>
 
+> [!NOTE]
+> **flake fork** — branch `flake-http-repeat-cfg` = upstream `b0x42/Super-Productivity-MCP` v1.8.0 plus: Streamable HTTP (MR #137), task repeat configs (SP PR #9798), and a time-tracker fix that sees and stops timers started from any device (requires `patches/sp-expose-current-task-id.patch` on the Super Productivity side).
+
 ## What You Can Do
 
 **✅ Quick Capture**
