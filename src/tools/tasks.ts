@@ -227,6 +227,105 @@ export const logTimeSchema = z.object(logTimeShape).strict();
 const getTaskRepeatCfgsShape = {};
 export const getTaskRepeatCfgsSchema = z.object(getTaskRepeatCfgsShape).strict();
 
+// ─── Task repeat cfg management (SP PR #9798) ────────────────────────────────
+//
+// SP's model: a repeat cfg is always attached to an existing task (the task
+// holds repeatCfgId, the cfg holds the template the next instances are
+// generated from). So "create" takes a task_id, and every write goes through
+// PluginAPI.addTaskRepeatCfg / updateTaskRepeatCfg / deleteTaskRepeatCfg —
+// typed methods that run the same validation, effects and op-log entries as
+// the schedule dialog. The plugin probes for them at runtime and returns a
+// clear error on SP builds that predate the patch.
+
+const repeatCycleSchema = z.enum(['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY']);
+
+/** Days the WEEKLY cycle reads. Field names are identical in SP's model. */
+export const REPEAT_WEEKDAYS = [
+  'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+] as const;
+export type RepeatWeekday = (typeof REPEAT_WEEKDAYS)[number];
+
+// Shared shape for create_task_repeat_cfg (minus task_id) and
+// update_task_repeat_cfg (minus repeat_cfg_id). Snake_case on the wire,
+// mapped to SP's camelCase before the command is sent.
+const taskRepeatCfgDataShape = {
+  title: z.string().nullable().optional().describe('Title for the generated tasks. Defaults to the source task\'s title. Pass null to clear (update only).'),
+  notes: z.string().nullable().optional().describe('Notes for the generated tasks. Pass null to clear (update only).'),
+  tag_ids: z.array(z.string()).optional().describe('Tag IDs for the generated tasks'),
+  default_estimate: z.number().optional().describe('Time estimate in milliseconds for the generated tasks'),
+  is_paused: z.boolean().optional().describe('Pause the recurrence — no new instances are created while paused'),
+  repeat_cycle: repeatCycleSchema.optional().describe('Repeat cycle. Defaults to DAILY.'),
+  repeat_every: z.number().int().min(1).max(1000).optional().describe('Every nth day/week/month/year (1-1000). Defaults to 1.'),
+  start_date: z.string().optional().describe('ISO date (YYYY-MM-DD) the recurrence counts from. Defaults to the task\'s due day, or today.'),
+  start_time: z.string().optional().describe('Time of day as HH:mm — instances are then scheduled with a reminder using the reminder offset from global config'),
+  ...Object.fromEntries(REPEAT_WEEKDAYS.map(day => [day, z.boolean().optional().describe(`WEEKLY only: repeat on ${day}s. Setting any weekday true on another cycle is rejected.`)])),
+  monthly_week_of_month: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(-1)]).optional().describe('MONTHLY only: 1-4 = first through fourth occurrence of the weekday, -1 = last'),
+  monthly_weekday: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6)]).optional().describe('MONTHLY only: 0 = Sunday … 6 = Saturday (pairs with monthly_week_of_month)'),
+  monthly_last_day: z.boolean().optional().describe('MONTHLY only: anchor to the last calendar day of every month'),
+} as Record<string, z.ZodTypeAny>;
+
+const createTaskRepeatCfgShape = {
+  task_id: z.string().describe('ID of the existing top-level task to make recurring (cannot be a subtask, an issue task, or already repeating)'),
+  ...taskRepeatCfgDataShape,
+};
+export const createTaskRepeatCfgSchema = z.object(createTaskRepeatCfgShape).strict();
+
+const updateTaskRepeatCfgShape = {
+  repeat_cfg_id: z.string().describe('Repeat config ID to update'),
+  ...taskRepeatCfgDataShape,
+};
+export const updateTaskRepeatCfgSchema = z.object(updateTaskRepeatCfgShape).strict();
+
+const deleteTaskRepeatCfgShape = {
+  repeat_cfg_id: z.string().describe('Repeat config ID to delete. Tasks it already created stay, but stop repeating.'),
+};
+export const deleteTaskRepeatCfgSchema = z.object(deleteTaskRepeatCfgShape).strict();
+
+/** Map the wire (snake_case) fields onto SP's PluginTaskRepeatCfgData (camelCase). */
+export function mapRepeatCfgData(
+  input: Partial<Record<string, unknown>>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (input.title !== undefined) out.title = input.title;
+  if (input.notes !== undefined) out.notes = input.notes;
+  if (input.tag_ids !== undefined) out.tagIds = input.tag_ids;
+  if (input.default_estimate !== undefined) out.defaultEstimate = input.default_estimate;
+  if (input.is_paused !== undefined) out.isPaused = input.is_paused;
+  if (input.repeat_cycle !== undefined) out.repeatCycle = input.repeat_cycle;
+  if (input.repeat_every !== undefined) out.repeatEvery = input.repeat_every;
+  if (input.start_date !== undefined) out.startDate = input.start_date;
+  if (input.start_time !== undefined) out.startTime = input.start_time;
+  for (const day of REPEAT_WEEKDAYS) {
+    if (input[day] !== undefined) out[day] = input[day];
+  }
+  if (input.monthly_week_of_month !== undefined) out.monthlyWeekOfMonth = input.monthly_week_of_month;
+  if (input.monthly_weekday !== undefined) out.monthlyWeekday = input.monthly_weekday;
+  if (input.monthly_last_day !== undefined) out.monthlyLastDay = input.monthly_last_day;
+  return out;
+}
+
+/**
+ * Coherence checks mirroring the SP bridge's own guards (super-productivity#9798),
+ * applied server-side so a bad payload fails with a named reason instead of a
+ * 2s poll round-trip first. Returns an error message, or null when coherent.
+ */
+export function validateRepeatCfgMerged(merged: {
+  repeatCycle?: string;
+} & Partial<Record<RepeatWeekday, unknown>>): string | null {
+  if (merged.repeatCycle === 'WEEKLY' && !REPEAT_WEEKDAYS.some(day => merged[day] === true)) {
+    return 'A WEEKLY repeat config needs at least one weekday set to true (monday…sunday) — otherwise it never produces an occurrence';
+  }
+  return null;
+}
+
+/** True when the patch flags a weekday true on a non-WEEKLY (effective) cycle. */
+export function setsWeekdayOffWeeklyCycle(
+  repeatCycle: string | undefined,
+  patch: Partial<Record<RepeatWeekday, unknown>>,
+): boolean {
+  return repeatCycle !== 'WEEKLY' && REPEAT_WEEKDAYS.some(day => patch[day] === true);
+}
+
 export function registerTaskTools(server: McpServer, dirs: ResolvedDirs): void {
   // create_task
   server.registerTool(
@@ -433,14 +532,14 @@ export function registerTaskTools(server: McpServer, dirs: ResolvedDirs): void {
   server.registerTool(
     'start_task',
     {
-      description: 'Start the time tracker on a task. If another task is being tracked, it will be stopped automatically. Cannot start tracking a completed task.',
+      description: 'Start the time tracker on a task — the real SP tracker, so time is credited and synced like from the app. If another task is being tracked, SP switches the timer to this task automatically. Cannot start tracking a completed task.',
       inputSchema: startTaskSchema,
     },
     async ({ task_id }) => {
       if (!task_id?.trim()) return errorResult('task_id is required');
       const res = await sendCommand(dirs, 'startTask', { taskId: task_id });
       if (!res.success) return errorResult(res.error ?? 'Failed to start task');
-      return okResult({ success: true });
+      return okResult(res.result ?? { started: true, taskId: task_id });
     },
   );
 
@@ -448,13 +547,13 @@ export function registerTaskTools(server: McpServer, dirs: ResolvedDirs): void {
   server.registerTool(
     'stop_task',
     {
-      description: 'Stop the currently running time tracker. Succeeds silently if no timer is running (idempotent).',
+      description: 'Stop the currently running time tracker — including timers started from other devices. Idempotent: reports stopped=false when nothing was running instead of failing.',
       inputSchema: stopTaskSchema,
     },
     async () => {
       const res = await sendCommand(dirs, 'stopTask', {});
       if (!res.success) return errorResult(res.error ?? 'Failed to stop task');
-      return okResult({ success: true });
+      return okResult(res.result ?? { stopped: false, taskId: null });
     },
   );
 
@@ -729,6 +828,78 @@ export function registerTaskTools(server: McpServer, dirs: ResolvedDirs): void {
       const res = await sendCommand(dirs, 'getTaskRepeatCfgs');
       if (!res.success) return errorResult(res.error ?? 'Failed to get repeat configs');
       return okResult({ repeatCfgs: res.result });
+    },
+  );
+
+  // create_task_repeat_cfg — attach a repeat config to an existing task (SP PR #9798)
+  server.registerTool(
+    'create_task_repeat_cfg',
+    {
+      description: 'Make an existing top-level task repeat by attaching a new repeat config to it. The config inherits the task\'s project, and its title defaults to the task\'s title. Without repeat_cycle the task repeats every day. The task cannot be a subtask, an issue task, or already repeating. Requires an SP build with the repeat-cfg plugin API (SP PR #9798); returns the created config\'s ID.',
+      inputSchema: createTaskRepeatCfgSchema,
+    },
+    async ({ task_id, ...cfgFields }) => {
+      if (!task_id?.trim()) return errorResult('task_id is required');
+
+      const patch = mapRepeatCfgData(cfgFields as Record<string, unknown>);
+      // Coherence on the patch alone: the effective cycle is the patch's, or DAILY.
+      const effectiveCycle = (patch.repeatCycle as string | undefined) ?? 'DAILY';
+      if (setsWeekdayOffWeeklyCycle(effectiveCycle, patch as Partial<Record<RepeatWeekday, unknown>>)) {
+        return errorResult(`Weekday flags are only read by the WEEKLY cycle — repeat_cycle "${effectiveCycle}" would store and silently ignore them`);
+      }
+      const coherenceError = validateRepeatCfgMerged({ repeatCycle: effectiveCycle, ...patch } as Parameters<typeof validateRepeatCfgMerged>[0]);
+      if (coherenceError) return errorResult(coherenceError);
+
+      const res = await sendCommand(dirs, 'addTaskRepeatCfg', { taskId: task_id, data: patch });
+      if (!res.success) return errorResult(res.error ?? 'Failed to create repeat config');
+      return okResult({ repeatCfgId: res.result });
+    },
+  );
+
+  // update_task_repeat_cfg — change an existing repeat config (SP PR #9798)
+  server.registerTool(
+    'update_task_repeat_cfg',
+    {
+      description: 'Update an existing repeat config by ID. Only the provided fields change; the rest keep their current values. Switching the cycle to WEEKLY requires at least one weekday to remain set overall. Requires an SP build with the repeat-cfg plugin API (SP PR #9798).',
+      inputSchema: updateTaskRepeatCfgSchema,
+    },
+    async ({ repeat_cfg_id, ...cfgFields }) => {
+      if (!repeat_cfg_id?.trim()) return errorResult('repeat_cfg_id is required');
+
+      // Validation runs against the merged result, not the patch: a cfg can be
+      // switched to WEEKLY while keeping its weekday flags, or lose its last
+      // flagged day — both leave a config that never produces an occurrence.
+      const listRes = await sendCommand(dirs, 'getTaskRepeatCfgs');
+      if (!listRes.success) return errorResult(listRes.error ?? 'Failed to get repeat configs');
+      const existing = ((listRes.result as Array<Record<string, unknown>>) ?? []).find(c => c.id === repeat_cfg_id);
+      if (!existing) return errorResult(`Repeat config not found: ${repeat_cfg_id}`);
+
+      const patch = mapRepeatCfgData(cfgFields as Record<string, unknown>);
+      const merged = { ...existing, ...patch } as Parameters<typeof validateRepeatCfgMerged>[0];
+      if (setsWeekdayOffWeeklyCycle(merged.repeatCycle as string | undefined, patch as Partial<Record<RepeatWeekday, unknown>>)) {
+        return errorResult(`Weekday flags are only read by the WEEKLY cycle — repeat_cycle "${merged.repeatCycle}" would store and silently ignore them`);
+      }
+      const coherenceError = validateRepeatCfgMerged(merged);
+      if (coherenceError) return errorResult(coherenceError);
+
+      const res = await sendCommand(dirs, 'updateTaskRepeatCfg', { repeatCfgId: repeat_cfg_id, data: patch });
+      if (!res.success) return errorResult(res.error ?? 'Failed to update repeat config');
+      return okResult({ success: true });
+    },
+  );
+
+  // delete_task_repeat_cfg — stop a recurrence (SP PR #9798)
+  server.registerTool(
+    'delete_task_repeat_cfg',
+    {
+      description: 'Delete a repeat config by ID. The tasks it already created stay, but stop repeating (this is irreversible and reaches every task the config produced). Requires the deleteTaskRepeatCfg plugin permission and an SP build with the repeat-cfg plugin API (SP PR #9798).',
+      inputSchema: deleteTaskRepeatCfgSchema,
+    },
+    async ({ repeat_cfg_id }) => {
+      if (!repeat_cfg_id?.trim()) return errorResult('repeat_cfg_id is required');
+      const res = await sendCommand(dirs, 'deleteTaskRepeatCfg', { repeatCfgId: repeat_cfg_id });
+      if (!res.success) return errorResult(res.error ?? 'Failed to delete repeat config');
+      return okResult({ success: true });
     },
   );
 }

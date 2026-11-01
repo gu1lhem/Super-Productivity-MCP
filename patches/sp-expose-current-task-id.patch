@@ -1,0 +1,17 @@
+diff --git a/src/app/plugins/plugin-bridge.service.ts b/src/app/plugins/plugin-bridge.service.ts
+--- a/src/app/plugins/plugin-bridge.service.ts
++++ b/src/app/plugins/plugin-bridge.service.ts
+@@ -858,7 +858,12 @@
+       >,
+       simpleCounters,
+       globalConfig: safeGlobalConfig,
+-    };
++      // flake patch: expose the live timer pointer so plugin time tracking
++      // (Super-Productivity-MCP) sees the real tracked task, including
++      // timers started from other devices. Not part of PluginAppState (an
++      // external package type) - hence the assertion below.
++      currentTaskId: taskState?.currentTaskId ?? null,
++    } as PluginAppState & { currentTaskId: string | null };
+   }
+ 
+   async reInitData(): Promise<void> {

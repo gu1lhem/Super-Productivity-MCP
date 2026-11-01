@@ -8,6 +8,7 @@ export interface Command {
   projectId?: string;
   tagId?: string;
   habitId?: string;
+  repeatCfgId?: string;
   message?: string;
   filters?: TaskFilters;
   // Fields for reorderTasks (FR-009)

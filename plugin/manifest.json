@@ -2,13 +2,14 @@
   "id": "super-productivity-mcp",
   "name": "SP MCP Server",
   "description": "MCP server bridge for AI assistant integration with Super Productivity",
-  "version": "1.8.0",
+  "version": "1.8.0-flake.1",
   "manifestVersion": 1,
   "minSupVersion": "19.0.1",
   "permissions": [
     "nodeExecution",
     "showIndexHtmlAsView",
-    "deleteProject"
+    "deleteProject",
+    "deleteTaskRepeatCfg"
   ],
   "hooks": [
     "taskUpdate",
@@ -19,6 +20,7 @@
   "iFrame": true,
   "isSkipMenuEntry": false,
   "icon": "icon.svg",
+  "jsonSchemaCfg": "config-schema.json",
   "categories": [
     "integration",
     "automation"

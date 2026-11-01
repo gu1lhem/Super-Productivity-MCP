@@ -125,6 +125,32 @@ Then run the server directly with `node`:
 
 The plugin to upload to Super Productivity is at `dist/plugin.zip` after `npm run build`.
 
+## Streamable HTTP (optional)
+
+By default the server speaks MCP over stdio — your client spawns it. Super Productivity can instead run **one long-lived server** that several clients (or other machines and containers) connect to over Streamable HTTP. It is **off by default**.
+
+Open **Settings → Plugins → SP MCP Server → ⚙** and tick **Enable Streamable HTTP server**. The plugin starts the server — there is nothing else to install — and stops it when you untick. Then point a client at `http://127.0.0.1:8765/mcp`:
+
+```json
+{ "mcpServers": { "super-productivity": { "type": "http", "url": "http://127.0.0.1:8765/mcp" } } }
+```
+
+| Setting | Default |
+|---|---|
+| Enable Streamable HTTP server | off |
+| Bind address | `127.0.0.1` (this machine only) |
+| Port | `8765` |
+| Start and stop the server from Super Productivity | on |
+| Require bearer token | off — best practice; recommended beyond `127.0.0.1` |
+| Allowed hosts / Allowed origins | empty |
+
+- **Manage it from the plugin's page.** An **MCP HTTP server** panel above the tool calls shows what the server is doing and has **Restart**, **Stop**/**Start** and, when a token is required, the token (**Show**, **Copy**, **New token**).
+- **A busy port** is tried 3 times, 5 seconds apart; then the error is reported and the server stops trying. Free the port and press **Restart**.
+- **Bad settings** keep the server off and show an error toast; nothing falls back to a default.
+- **The endpoint can read and change all your tasks.** It binds to `127.0.0.1` by default; before binding to a network address, require a token and set allowed hosts and origins.
+
+→ [Full guide: settings, security, the bearer token, running it yourself](docs/streamable-http.md)
+
 ## Prerequisites
 
 - [Super Productivity](https://super-productivity.com) >= 19.0.1
@@ -145,11 +171,13 @@ The plugin to upload to Super Productivity is at `dist/plugin.zip` after `npm ru
 | `create_project` | Create a new project |
 | `create_tag` | Create a new tag |
 | `create_task` | Create a task (supports SP short syntax), optionally with `priority` (1 Low, 2 Medium, 3 High) |
+| `create_task_repeat_cfg` | Make an existing top-level task repeat by attaching a repeat config to it (`repeat_cycle` DAILY/WEEKLY/MONTHLY/YEARLY, `repeat_every`, weekdays, monthly anchors). Requires an SP build with the repeat-cfg plugin API (SP PR #9798) |
 | `create_task_with_subtasks` | Create a parent task + subtasks in one operation, with optional `priority` on the parent and each subtask |
 | `debug_directories` | Show resolved data directory paths |
 | `delete_habit` | Permanently delete a habit |
 | `delete_project` | Permanently delete a project and all tasks it contains. Cannot delete the Inbox |
 | `delete_task` | Permanently delete a task (parent deletes subtasks too). Archived tasks can't be deleted — SP's plugin API is read-only for the archive |
+| `delete_task_repeat_cfg` | Delete a repeat config — tasks it already created stay, but stop repeating. Requires an SP build with the repeat-cfg plugin API (SP PR #9798) and the `deleteTaskRepeatCfg` plugin permission |
 | `get_current_task` | Get the currently tracked task (null if none) |
 | `get_habits` | List all habits, including each one's computed streak length |
 | `get_projects` | List all projects |
@@ -165,12 +193,13 @@ The plugin to upload to Super Productivity is at `dist/plugin.zip` after `npm ru
 | `reorder_tasks` | Reorder tasks within a project or parent. Rejects backlog tasks — use `move_tasks_backlog` |
 | `set_habit_value` | Set a habit's exact value for a day — backfill or correct history |
 | `show_notification` | Show a snackbar in SP's UI |
-| `start_task` | Start the time tracker on a task |
-| `stop_task` | Stop the currently running time tracker |
+| `start_task` | Start the time tracker on a task (the real SP tracker — time is credited and synced) |
+| `stop_task` | Stop the currently running time tracker — idempotent, reports whether a timer was actually running |
 | `update_habit` | Update habit title, icon, enabled state, or streak config |
 | `update_project` | Update project properties |
 | `update_tag` | Update tag properties |
 | `update_task` | Update title, notes, done state, due date, deadline, `priority` (1–3, `null` clears), `planned_at`, timed schedule (`due_with_time`) and reminder (`remind_at`) ⚠️ [limited](#known-limitations), time estimate, tags |
+| `update_task_repeat_cfg` | Update an existing repeat config by ID — only the provided fields change. Requires an SP build with the repeat-cfg plugin API (SP PR #9798) |
 
 Habit tools (`create_habit`, `get_habits`, `update_habit`, `check_habit`, `set_habit_value`, `delete_habit`) require a Super Productivity build newer than the `14.0.0` minimum above — on older builds they return a clear "requires a newer version" error instead of failing silently.
 
@@ -214,6 +243,9 @@ The plugin adds a **MCP Bridge** pane to Super Productivity's menu listing what
 the assistant has done — one row per tool call with the time, tool name,
 duration, and whether it succeeded. Click a row to see the arguments it was
 called with and the result it returned; failures show the error message.
+
+The [Streamable HTTP server panel](docs/streamable-http.md#managing-the-server)
+sits above the list on the same page.
 
 The server writes each call to `tool-calls.jsonl` in the same data directory it
 uses for IPC (`debug_directories` shows the path). The log keeps the most recent

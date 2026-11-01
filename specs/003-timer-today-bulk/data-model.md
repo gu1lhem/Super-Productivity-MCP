@@ -1,5 +1,13 @@
 # Data Model: Timer Control, Today Tasks & Bulk Operations
 
+> **flake fork amendment (1.8.0-flake.1)**: the mechanism below is historical. SP v19 removed
+> `Task.currentTimestamp` from the model — writing it never started the real tracker, so no
+> time was credited and phone-started timers were invisible. The fork now dispatches the real
+> NgRx actions (`[Task] SetCurrentTask` to start, `[Task] Toggle start` to stop — only when a
+> task is actually running, since a blind toggle starts the next task of today) and reads the
+> live pointer `getAppState().currentTaskId` (exposed by the flake SP build patch). The user
+> scenarios and acceptance criteria below remain valid.
+
 **Feature**: Timer Control, Today Tasks & Bulk Operations
 **Created**: 2026-04-28
 **Source**: [spec.md](spec.md)
